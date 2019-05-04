@@ -1,0 +1,140 @@
+---
+title: "Feedback Analysis"
+author: "Pritesh"
+date: "Aug 31, 2018"
+output: html_document
+---
+
+## Read data 
+```{r}
+library(stringr)
+library(tidyverse)
+library(tidytext)
+
+train <- read_csv("train.csv")
+head(train)
+```
+
+## Clean trainging tweets
+```{r}
+library(magrittr)
+remove_reg <- "&amp;|&lt;|&gt;"
+
+train_tidy <- train %>% 
+  mutate(text = str_remove_all(tweet, remove_reg)) %>%
+  unnest_tokens(word, text) %>%
+  filter(!word %in% stop_words$word, ## stop_words already added
+         !word %in% str_remove_all(stop_words$word, "'"),
+         str_detect(word, "[a-z]"))
+
+head(train_tidy)
+```
+
+## Sentiment Analysis
+```{r}
+senti <- get_sentiments("afinn")
+head(senti)
+```
+
+## Plotting sentiments scores
+```{r}
+sentiment_count <- train_tidy %>% 
+  count(word, sort = TRUE) %>%
+  inner_join(senti) %>% 
+  mutate(word = reorder(word, n)) 
+
+sentiment_count %>%
+  filter(n > 70) %>%
+  ggplot(aes(word,n)) +
+  geom_col() +
+  xlab(NULL) +
+  coord_flip() +
+  facet_grid(.~ score)
+
+sentiment_count
+```
+
+## Using afinn sentiments
+```{r}
+train_tidy %<>% left_join(senti, by = 'word')
+
+train_tidy
+```
+
+## Do afinn sentiments match with labels ?
+```{r}
+train_score <- train_tidy %>%
+  group_by(id,label, tweet) %>%
+  summarise(tot_score = sum(score, na.rm = TRUE))
+
+train_score
+```
+
+## Let's plot relationship
+```{r}
+train_score %>%
+  ggplot(aes(x=tot_score, y = as.factor(label))) +
+  geom_point() +
+  coord_flip()
+```
+
+## Let's check training set accuracy - 62%
+```{r}
+train_score %<>%
+  mutate(pred = as.integer(ifelse(tot_score>0, 0, 1)))
+
+head(train_score)
+
+library(caret)
+confusionMatrix(table(train_score$label, train_score$pred))
+```
+
+## Let's make a submission with the afinn model
+```{r}
+test <- read_csv("test.csv")
+test
+```
+
+## Clean test tweets
+```{r}
+remove_reg <- "&amp;|&lt;|&gt;"
+
+test_tidy <- test %>% 
+  mutate(text = str_remove_all(tweet, remove_reg)) %>%
+  unnest_tokens(word, text) %>%
+  filter(!word %in% stop_words$word, ## stop_words already added
+         !word %in% str_remove_all(stop_words$word, "'"),
+         str_detect(word, "[a-z]"))
+
+head(test_tidy)
+```
+
+## Apply afinn sentiments to test_tidy
+```{r}
+test_tidy %<>% left_join(senti, by = 'word')
+test_tidy
+```
+
+## Summing up final scores for each tweet in test set
+```{r}
+test_score <- test_tidy %>%
+  group_by(id, tweet) %>%
+  summarise(tot_score = sum(score, na.rm = TRUE))
+
+test_score
+```
+
+## Predictions for test set
+```{r}
+test_score %<>%
+  mutate(label = as.integer(ifelse(tot_score>0, 0, 1)))
+
+head(test_score)
+```
+
+## File for submission
+```{r}
+write.csv(select(test_score, id, label), "afinn.csv")
+```
+
+Test Set Accuracy (from AV) - 67%. Improvement from the sample submission accuracy !
